@@ -19,8 +19,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Gravity Clock v1.0</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -80,6 +78,7 @@ const NUM_RADIUS      = 46;
 const ARM_PUSH_ARC    = 0.20;
 const ARM_PUSH_FORCE  = 10;
 const FONT_SIZE       = 88;
+const FONT            = `bold ${FONT_SIZE}px Arial Black, Arial, sans-serif`;
 const SLEEP_V         = 0.4;    // below this speed → freeze
 const SLEEP_A         = 0.008;  // below this angVel → freeze rotation
 
@@ -278,8 +277,8 @@ ctx.stroke();
 ctx.restore();
 }
 
-// Pre-warm font so first frame isn’t a flash
-ctx.font = `${FONT_SIZE}px Anton, sans-serif`;
+// Pre-warm font
+ctx.font = FONT;
 ctx.fillText(’’, 0, 0);
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
@@ -292,7 +291,7 @@ function loop(ts) {
 requestAnimationFrame(loop);
 if (ts - lastTime < FRAME_MS) return;
 lastTime = ts;
-
+try {
 const { sec, min, hr } = clockAngles();
 
 let dAngle = 0;
@@ -323,7 +322,7 @@ ctx.lineWidth = 2;
 ctx.stroke();
 
 // 4. Numbers (physics layer)
-ctx.font         = `${FONT_SIZE}px Anton, sans-serif`;
+ctx.font         = FONT;
 ctx.textAlign    = ‘center’;
 ctx.textBaseline = ‘middle’;
 
@@ -363,6 +362,14 @@ ctx.beginPath();
 ctx.arc(CX, CY, 7, 0, Math.PI * 2);
 ctx.fillStyle = ‘#fff’;
 ctx.fill();
+} catch(e) {
+ctx.fillStyle = ‘#cc0000’;
+ctx.fillRect(0, 0, W, H);
+ctx.fillStyle = ‘#fff’;
+ctx.font = ‘bold 48px Arial’;
+ctx.textAlign = ‘left’;
+ctx.fillText(’ERROR: ’ + e.message, 40, H/2);
+}
 }
 
 requestAnimationFrame(loop);
