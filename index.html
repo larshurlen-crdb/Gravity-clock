@@ -2,15 +2,15 @@
 
 <!--
   ╔══════════════════════════════════════════════════════╗
-  ║           GRAVITY CLOCK — Version History            ║
+  ║           GRAVITY CLOCK - Version History            ║
   ╠══════════════════════════════════════════════════════╣
   ║ v1.0  Initial release                               ║
-  ║       · 12 physics bodies with gravity + sleep      ║
-  ║       · Seconds arm sweeps & wakes numbers          ║
-  ║       · Viscous damping, minimal bounce             ║
-  ║       · Pink background, black disk                 ║
-  ║       · Red hour/minute arms, blue seconds arm      ║
-  ║       · Frame TV safe (overdraw, 30fps, no offscreen)║
+  ║       - 12 physics bodies with gravity + sleep      ║
+  ║       - Seconds arm sweeps and wakes numbers        ║
+  ║       - Viscous damping, minimal bounce             ║
+  ║       - Pink background, black disk                 ║
+  ║       - Red hour/minute arms, blue seconds arm      ║
+  ║       - Frame TV safe (overdraw, 30fps, no offscreen)║
   ╚══════════════════════════════════════════════════════╝
 -->
 
@@ -30,247 +30,225 @@
     height: 100vh;
     overflow: hidden;
   }
-  canvas {
-    display: block;
-    image-rendering: crisp-edges;
+  canvas { display: block; }
+  #err {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    background: #c00;
+    color: #fff;
+    font: bold 20px Arial;
+    padding: 16px;
+    z-index: 99;
+    word-wrap: break-word;
   }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="err" style="display:none;position:fixed;top:0;left:0;width:100%;background:#c00;color:#fff;font:bold 24px Arial;padding:20px;z-index:99;word-wrap:break-word;"></div>
+<div id="err"></div>
 <script>
-window.onerror = function(msg, src, line) {
-  var el = document.getElementById('err');
-  el.style.display = 'block';
-  el.textContent = 'JS ERROR (line ' + line + '): ' + msg;
+(function () {
+
+function showError(msg) {
+var el = document.getElementById(‘err’);
+el.style.display = ‘block’;
+el.textContent = msg;
+}
+
+window.onerror = function (msg, src, line) {
+showError(’ERROR line ’ + line + ’: ’ + msg);
 };
 
-try {
-const canvas = document.getElementById(‘c’);
-const ctx = canvas.getContext(‘2d’);
+// –– Canvas setup ––
+var canvas = document.getElementById(‘c’);
+var ctx    = canvas.getContext(‘2d’);
 
-// Internal resolution: 16:9
-const W = 1920;
-const H = 1080;
-canvas.width = W;
+var W = 1920;
+var H = 1080;
+canvas.width  = W;
 canvas.height = H;
 
 function resize() {
-const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+var scale = Math.min(window.innerWidth / W, window.innerHeight / H);
 canvas.style.width  = (W * scale) + ‘px’;
 canvas.style.height = (H * scale) + ‘px’;
 }
 resize();
 window.addEventListener(‘resize’, resize);
 
-// ─── Layout ───────────────────────────────────────────────────────────────────
-const CX = W / 2;
-const CY = H / 2;
-const DISK_R = 470;
+// –– Layout ––
+var CX     = W / 2;
+var CY     = H / 2;
+var DISK_R = 470;
 
-// ─── Colours ──────────────────────────────────────────────────────────────────
-const COL_BG   = ‘#F06BCC’;   // vivid pink
-const COL_DISK = ‘#0A0A0A’;   // near-black
-const COL_NUM  = ‘#FFFFFF’;
-const COL_HAND = ‘#EE1A1A’;   // red
-const COL_SEC  = ‘#1A3EEE’;   // blue
-const COL_DOT  = ‘#1A3EEE’;
+// –– Colours ––
+var COL_BG   = ‘#F06BCC’;
+var COL_DISK = ‘#0A0A0A’;
+var COL_NUM  = ‘#FFFFFF’;
+var COL_HAND = ‘#EE1A1A’;
+var COL_SEC  = ‘#1A3EEE’;
+var COL_DOT  = ‘#1A3EEE’;
 
-// ─── Physics constants ────────────────────────────────────────────────────────
-const GRAVITY         = 0.7;
-const FRICTION        = 0.82;   // heavy drag
-const ANGULAR_DAMP    = 0.55;   // spin dies in a few frames
-const BOUNCE          = 0.05;   // almost no rebound
-const NUM_RADIUS      = 46;
-const ARM_PUSH_ARC    = 0.20;
-const ARM_PUSH_FORCE  = 10;
-const FONT_SIZE       = 88;
-const FONT            = `bold ${FONT_SIZE}px Arial Black, Arial, sans-serif`;
-const SLEEP_V         = 0.4;    // below this speed → freeze
-const SLEEP_A         = 0.008;  // below this angVel → freeze rotation
+// –– Physics constants ––
+var GRAVITY        = 0.7;
+var FRICTION       = 0.82;
+var ANGULAR_DAMP   = 0.55;
+var BOUNCE         = 0.05;
+var NUM_RADIUS     = 46;
+var ARM_PUSH_ARC   = 0.20;
+var ARM_PUSH_FORCE = 10;
+var FONT_SIZE      = 88;
+var FONT           = ’bold ’ + FONT_SIZE + ‘px Arial Black, Arial, sans-serif’;
+var SLEEP_V        = 0.4;
+var SLEEP_A        = 0.008;
 
-// ─── Numbers ──────────────────────────────────────────────────────────────────
-function makePile() {
-// Drop numbers into a central bottom cluster so they settle naturally
-const nums = [];
-for (let i = 1; i <= 12; i++) {
-// Stagger positions in a tight cluster at the bottom of the disk
-const col = (i - 1) % 4;
-const row = Math.floor((i - 1) / 4);
-nums.push({
-label: String(i),
-x: CX + (col - 1.5) * (NUM_RADIUS * 2.1) + (Math.random() - 0.5) * 20,
-y: CY + DISK_R * 0.55 + row * (NUM_RADIUS * 2.1) + (Math.random() - 0.5) * 20,
-vx: 0,
-vy: 0,
-angle: (Math.random() - 0.5) * 0.4,
-angVel: 0,
-r: NUM_RADIUS,
-sleeping: false,
+// –– Build number pile ––
+var numbers = [];
+for (var i = 1; i <= 12; i++) {
+var col = (i - 1) % 4;
+var row = Math.floor((i - 1) / 4);
+numbers.push({
+label:    String(i),
+x:        CX + (col - 1.5) * (NUM_RADIUS * 2.1) + (Math.random() - 0.5) * 20,
+y:        CY + DISK_R * 0.55 + row * (NUM_RADIUS * 2.1) + (Math.random() - 0.5) * 20,
+vx:       0,
+vy:       0,
+angle:    (Math.random() - 0.5) * 0.4,
+angVel:   0,
+r:        NUM_RADIUS,
+sleeping: false
 });
 }
-return nums;
-}
 
-const numbers = makePile();
-
-// ─── Clock angles ─────────────────────────────────────────────────────────────
+// –– Clock angles ––
 function clockAngles() {
-const now  = new Date();
-const h    = now.getHours() % 12;
-const m    = now.getMinutes();
-const s    = now.getSeconds();
-const ms   = now.getMilliseconds();
-const base = -Math.PI / 2;
-
-const sec = base + ((s + ms / 1000) / 60) * Math.PI * 2;
-const min = base + ((m + s / 60)   / 60) * Math.PI * 2;
-const hr  = base + ((h + m / 60)   / 12) * Math.PI * 2;
-return { sec, min, hr };
+var now  = new Date();
+var h    = now.getHours() % 12;
+var m    = now.getMinutes();
+var s    = now.getSeconds();
+var ms   = now.getMilliseconds();
+var base = -Math.PI / 2;
+return {
+sec: base + ((s + ms / 1000) / 60) * Math.PI * 2,
+min: base + ((m + s  / 60)   / 60) * Math.PI * 2,
+hr:  base + ((h + m  / 60)   / 12) * Math.PI * 2
+};
 }
 
-// ─── Physics ──────────────────────────────────────────────────────────────────
-function angularDiff(a, b) {
-let d = a - b;
+// –– Angular difference ––
+function angDiff(a, b) {
+var d = a - b;
 while (d >  Math.PI) d -= Math.PI * 2;
 while (d < -Math.PI) d += Math.PI * 2;
 return d;
 }
 
+// –– Seconds arm sweeps numbers ––
 function applySweep(secAngle, dAngle) {
 if (Math.abs(dAngle) < 0.00005) return;
-for (const n of numbers) {
-const dx   = n.x - CX;
-const dy   = n.y - CY;
-const dist = Math.hypot(dx, dy);
+for (var i = 0; i < numbers.length; i++) {
+var n    = numbers[i];
+var dx   = n.x - CX;
+var dy   = n.y - CY;
+var dist = Math.sqrt(dx * dx + dy * dy);
 if (dist < 10) continue;
-
-```
-const numAngle = Math.atan2(dy, dx);
-const diff     = angularDiff(numAngle, secAngle);
-
-// Number is "just behind" the sweeping arm (within push arc)
+var na        = Math.atan2(dy, dx);
+var diff      = angDiff(na, secAngle);
 if (diff > -ARM_PUSH_ARC && diff < ARM_PUSH_ARC * 0.3) {
-  // Tangential direction of clockwise sweep
-  const tx = -dy / dist;
-  const ty =  dx / dist;
-  // Strength scales with how close to dead-on and how far from centre
-  const proximity = 1 - Math.abs(diff) / ARM_PUSH_ARC;
-  const leverage  = dist / DISK_R;
-  const force     = ARM_PUSH_FORCE * proximity * (0.4 + leverage * 0.8);
-  n.vx    += tx * force;
-  n.vy    += ty * force;
-  n.angVel += dAngle * 0.5 * proximity;
-  n.sleeping = false;  // wake it up
+var tx        = -dy / dist;
+var ty        =  dx / dist;
+var proximity = 1 - Math.abs(diff) / ARM_PUSH_ARC;
+var leverage  = dist / DISK_R;
+var force     = ARM_PUSH_FORCE * proximity * (0.4 + leverage * 0.8);
+n.vx      += tx * force;
+n.vy      += ty * force;
+n.angVel  += dAngle * 0.5 * proximity;
+n.sleeping = false;
 }
-```
-
 }
 }
 
-function resolveNumberCollisions() {
-const len = numbers.length;
-for (let i = 0; i < len; i++) {
-for (let j = i + 1; j < len; j++) {
-const a  = numbers[i];
-const b  = numbers[j];
-const dx = b.x - a.x;
-const dy = b.y - a.y;
-const d  = Math.hypot(dx, dy);
-const minD = a.r + b.r;
+// –– Number collisions ––
+function resolveCollisions() {
+for (var i = 0; i < numbers.length; i++) {
+for (var j = i + 1; j < numbers.length; j++) {
+var a    = numbers[i];
+var b    = numbers[j];
+var dx   = b.x - a.x;
+var dy   = b.y - a.y;
+var d    = Math.sqrt(dx * dx + dy * dy);
+var minD = a.r + b.r;
 if (d >= minD || d < 0.01) continue;
-
-```
-  const nx  = dx / d;
-  const ny  = dy / d;
-  const ov  = (minD - d) * 0.5;
-  a.x -= nx * ov;
-  a.y -= ny * ov;
-  b.x += nx * ov;
-  b.y += ny * ov;
-
-  const dvx = b.vx - a.vx;
-  const dvy = b.vy - a.vy;
-  const dot = dvx * nx + dvy * ny;
-  if (dot >= 0) continue;
-
-  const imp = dot * (1 + BOUNCE) * 0.5;
-  a.vx += nx * imp; a.sleeping = false;
-  a.vy += ny * imp;
-  b.vx -= nx * imp; b.sleeping = false;
-  b.vy -= ny * imp;
-
-  const cross = dvx * ny - dvy * nx;
-  a.angVel += cross * 0.006;
-  b.angVel -= cross * 0.006;
+var nx  = dx / d;
+var ny  = dy / d;
+var ov  = (minD - d) * 0.5;
+a.x -= nx * ov;  a.y -= ny * ov;
+b.x += nx * ov;  b.y += ny * ov;
+var dvx = b.vx - a.vx;
+var dvy = b.vy - a.vy;
+var dot = dvx * nx + dvy * ny;
+if (dot >= 0) continue;
+var imp = dot * (1 + BOUNCE) * 0.5;
+a.vx += nx * imp;  a.vy += ny * imp;  a.sleeping = false;
+b.vx -= nx * imp;  b.vy -= ny * imp;  b.sleeping = false;
+var cross = dvx * ny - dvy * nx;
+a.angVel += cross * 0.006;
+b.angVel -= cross * 0.006;
 }
-```
-
 }
 }
 
+// –– Disk wall ––
 function resolveWalls() {
-for (const n of numbers) {
-const dx   = n.x - CX;
-const dy   = n.y - CY;
-const dist = Math.hypot(dx, dy);
-const maxD = DISK_R - n.r;
+for (var i = 0; i < numbers.length; i++) {
+var n    = numbers[i];
+var dx   = n.x - CX;
+var dy   = n.y - CY;
+var dist = Math.sqrt(dx * dx + dy * dy);
+var maxD = DISK_R - n.r;
 if (dist <= maxD || dist < 0.01) continue;
-
-```
-const nx = dx / dist;
-const ny = dy / dist;
-n.x  = CX + nx * maxD;
-n.y  = CY + ny * maxD;
-
-const dot = n.vx * nx + n.vy * ny;
+var nx = dx / dist;
+var ny = dy / dist;
+n.x = CX + nx * maxD;
+n.y = CY + ny * maxD;
+var dot = n.vx * nx + n.vy * ny;
 if (dot > 0) {
-  n.vx -= (1 + BOUNCE) * dot * nx;
-  n.vy -= (1 + BOUNCE) * dot * ny;
-  n.angVel *= BOUNCE;
+n.vx    -= (1 + BOUNCE) * dot * nx;
+n.vy    -= (1 + BOUNCE) * dot * ny;
+n.angVel *= BOUNCE;
 }
-```
-
 }
 }
 
+// –– Physics step ––
 function stepPhysics(secAngle, dAngle) {
-// Wake numbers that the arm is about to push
 applySweep(secAngle, dAngle);
-
-for (const n of numbers) {
+for (var i = 0; i < numbers.length; i++) {
+var n = numbers[i];
 if (n.sleeping) continue;
-
-```
-n.vy     += GRAVITY;
-n.vx     *= FRICTION;
-n.vy     *= FRICTION;
-n.x      += n.vx;
-n.y      += n.vy;
-n.angle  += n.angVel;
+n.vy    += GRAVITY;
+n.vx    *= FRICTION;
+n.vy    *= FRICTION;
+n.x     += n.vx;
+n.y     += n.vy;
+n.angle += n.angVel;
 n.angVel *= ANGULAR_DAMP;
-
-// Hard-clamp tiny residual spin to zero
 if (Math.abs(n.angVel) < SLEEP_A) n.angVel = 0;
-
-// Sleep check
-const speed = Math.hypot(n.vx, n.vy);
-if (speed < SLEEP_V && Math.abs(n.angVel) === 0) {
-  n.vx = 0; n.vy = 0;
-  n.sleeping = true;
+var speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
+if (speed < SLEEP_V && n.angVel === 0) {
+n.vx = 0; n.vy = 0;
+n.sleeping = true;
 }
-```
-
 }
-
-for (let iter = 0; iter < 2; iter++) {
-resolveNumberCollisions();
+resolveCollisions();
+resolveWalls();
+resolveCollisions();
 resolveWalls();
 }
-}
 
-// ─── Drawing helpers ──────────────────────────────────────────────────────────
+// –– Draw hand ––
 function drawHand(angle, length, backLen, width, color) {
 ctx.save();
 ctx.translate(CX, CY);
@@ -285,34 +263,28 @@ ctx.stroke();
 ctx.restore();
 }
 
-// Pre-warm font
-ctx.font = FONT;
-ctx.fillText(’’, 0, 0);
-
-// ─── Main loop ────────────────────────────────────────────────────────────────
-const FPS      = 30;
-const FRAME_MS = 1000 / FPS;
-let lastTime   = 0;
-let prevSec    = null;
+// –– Main loop ––
+var FPS      = 30;
+var FRAME_MS = 1000 / FPS;
+var lastTime = 0;
+var prevSec  = null;
 
 function loop(ts) {
 requestAnimationFrame(loop);
 if (ts - lastTime < FRAME_MS) return;
 lastTime = ts;
-try {
-const { sec, min, hr } = clockAngles();
 
-let dAngle = 0;
-if (prevSec !== null) {
-dAngle = angularDiff(sec, prevSec);
-}
-prevSec = sec;
+```
+var angles = clockAngles();
+var sec    = angles.sec;
+var min    = angles.min;
+var hr     = angles.hr;
+var dAngle = (prevSec === null) ? 0 : angDiff(sec, prevSec);
+prevSec    = sec;
 
 stepPhysics(sec, dAngle);
 
-// ── Render ──────────────────────────────────────────────────────────────────
-
-// 1. Pink background (overdraw – no clearRect)
+// 1. Pink background - overdraw, no clearRect
 ctx.fillStyle = COL_BG;
 ctx.fillRect(0, 0, W, H);
 
@@ -322,71 +294,47 @@ ctx.arc(CX, CY, DISK_R, 0, Math.PI * 2);
 ctx.fillStyle = COL_DISK;
 ctx.fill();
 
-// 3. Subtle disk rim
-ctx.beginPath();
-ctx.arc(CX, CY, DISK_R, 0, Math.PI * 2);
-ctx.strokeStyle = ‘rgba(255,255,255,0.06)’;
-ctx.lineWidth = 2;
-ctx.stroke();
-
-// 4. Numbers (physics layer)
+// 3. Numbers
 ctx.font         = FONT;
-ctx.textAlign    = ‘center’;
-ctx.textBaseline = ‘middle’;
-
-for (const n of numbers) {
-ctx.save();
-ctx.translate(n.x, n.y);
-ctx.rotate(n.angle);
-// Soft shadow for depth
-ctx.shadowColor   = ‘rgba(0,0,0,0.6)’;
-ctx.shadowBlur    = 8;
-ctx.shadowOffsetX = 3;
-ctx.shadowOffsetY = 3;
-ctx.fillStyle = COL_NUM;
-ctx.fillText(n.label, 0, 0);
-ctx.restore();
+ctx.textAlign    = 'center';
+ctx.textBaseline = 'middle';
+for (var i = 0; i < numbers.length; i++) {
+  var n = numbers[i];
+  ctx.save();
+  ctx.translate(n.x, n.y);
+  ctx.rotate(n.angle);
+  ctx.shadowColor   = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur    = 8;
+  ctx.shadowOffsetX = 3;
+  ctx.shadowOffsetY = 3;
+  ctx.fillStyle = COL_NUM;
+  ctx.fillText(n.label, 0, 0);
+  ctx.restore();
 }
-
-// Reset shadow before hands
-ctx.shadowColor = ‘transparent’;
+ctx.shadowColor = 'transparent';
 ctx.shadowBlur  = 0;
 
-// 5. Hour hand (red, short, thick)
-drawHand(hr, DISK_R * 0.48, DISK_R * 0.12, 14, COL_HAND);
+// 4. Hands
+drawHand(hr,  DISK_R * 0.48, DISK_R * 0.12, 14, COL_HAND);
+drawHand(min, DISK_R * 0.75, DISK_R * 0.12,  9, COL_HAND);
+drawHand(sec, DISK_R * 0.88, DISK_R * 0.18,  5, COL_SEC);
 
-// 6. Minute hand (red, long, medium)
-drawHand(min, DISK_R * 0.75, DISK_R * 0.12, 9, COL_HAND);
-
-// 7. Seconds hand (blue, longest, thin)
-drawHand(sec, DISK_R * 0.88, DISK_R * 0.18, 5, COL_SEC);
-
-// 8. Centre pivot
+// 5. Centre pivot
 ctx.beginPath();
 ctx.arc(CX, CY, 16, 0, Math.PI * 2);
 ctx.fillStyle = COL_DOT;
 ctx.fill();
 ctx.beginPath();
 ctx.arc(CX, CY, 7, 0, Math.PI * 2);
-ctx.fillStyle = ‘#fff’;
+ctx.fillStyle = '#fff';
 ctx.fill();
-} catch(e) {
-ctx.fillStyle = ‘#cc0000’;
-ctx.fillRect(0, 0, W, H);
-ctx.fillStyle = ‘#fff’;
-ctx.font = ‘bold 48px Arial’;
-ctx.textAlign = ‘left’;
-ctx.fillText(’ERROR: ’ + e.message, 40, H/2);
-}
+```
+
 }
 
 requestAnimationFrame(loop);
 
-} catch(e) {
-var el = document.getElementById(‘err’);
-el.style.display = ‘block’;
-el.textContent = ’INIT ERROR: ’ + e.message;
-}
+})();
 </script>
 
 </body>
