@@ -38,9 +38,17 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="err" style="display:none;position:fixed;top:0;left:0;width:100%;background:#c00;color:#fff;font:bold 24px Arial;padding:20px;z-index:99;word-wrap:break-word;"></div>
 <script>
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+window.onerror = function(msg, src, line) {
+  var el = document.getElementById('err');
+  el.style.display = 'block';
+  el.textContent = 'JS ERROR (line ' + line + '): ' + msg;
+};
+
+try {
+const canvas = document.getElementById(‘c’);
+const ctx = canvas.getContext(‘2d’);
 
 // Internal resolution: 16:9
 const W = 1920;
@@ -373,6 +381,12 @@ ctx.fillText(’ERROR: ’ + e.message, 40, H/2);
 }
 
 requestAnimationFrame(loop);
+
+} catch(e) {
+var el = document.getElementById(‘err’);
+el.style.display = ‘block’;
+el.textContent = ’INIT ERROR: ’ + e.message;
+}
 </script>
 
 </body>
