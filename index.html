@@ -1,340 +1,45 @@
 <!DOCTYPE html>
 
-<!--
-  ╔══════════════════════════════════════════════════════╗
-  ║           GRAVITY CLOCK - Version History            ║
-  ╠══════════════════════════════════════════════════════╣
-  ║ v1.0  Initial release                               ║
-  ║       - 12 physics bodies with gravity + sleep      ║
-  ║       - Seconds arm sweeps and wakes numbers        ║
-  ║       - Viscous damping, minimal bounce             ║
-  ║       - Pink background, black disk                 ║
-  ║       - Red hour/minute arms, blue seconds arm      ║
-  ║       - Frame TV safe (overdraw, 30fps, no offscreen)║
-  ╚══════════════════════════════════════════════════════╝
--->
-
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gravity Clock v1.0</title>
+<title>Test</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: #000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100vw;
-    height: 100vh;
-    overflow: hidden;
-  }
-  canvas { display: block; }
-  #err {
-    display: none;
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%;
-    background: #c00;
-    color: #fff;
-    font: bold 20px Arial;
-    padding: 16px;
-    z-index: 99;
-    word-wrap: break-word;
-  }
+* { margin:0; padding:0; }
+body { background: #000; width:100vw; height:100vh; }
+canvas { display:block; width:100vw; height:100vh; }
+#msg { position:fixed; top:20px; left:20px; color:#fff; font:bold 32px Arial; z-index:99; }
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="err"></div>
+<canvas id="c" width="1920" height="1080"></canvas>
+<div id="msg">Loading...</div>
 <script>
-(function () {
+var msg = document.getElementById('msg');
+try {
+  var canvas = document.getElementById('c');
+  var ctx = canvas.getContext('2d');
 
-function showError(msg) {
-var el = document.getElementById(‘err’);
-el.style.display = ‘block’;
-el.textContent = msg;
-}
+// Draw immediately - no animation loop
+ctx.fillStyle = ‘#F06BCC’;
+ctx.fillRect(0, 0, 1920, 1080);
 
-window.onerror = function (msg, src, line) {
-showError(’ERROR line ’ + line + ’: ’ + msg);
-};
-
-// –– Canvas setup ––
-var canvas = document.getElementById(‘c’);
-var ctx    = canvas.getContext(‘2d’);
-
-var W = 1920;
-var H = 1080;
-canvas.width  = W;
-canvas.height = H;
-
-function resize() {
-var scale = Math.min(window.innerWidth / W, window.innerHeight / H);
-canvas.style.width  = (W * scale) + ‘px’;
-canvas.style.height = (H * scale) + ‘px’;
-}
-resize();
-window.addEventListener(‘resize’, resize);
-
-// –– Layout ––
-var CX     = W / 2;
-var CY     = H / 2;
-var DISK_R = 470;
-
-// –– Colours ––
-var COL_BG   = ‘#F06BCC’;
-var COL_DISK = ‘#0A0A0A’;
-var COL_NUM  = ‘#FFFFFF’;
-var COL_HAND = ‘#EE1A1A’;
-var COL_SEC  = ‘#1A3EEE’;
-var COL_DOT  = ‘#1A3EEE’;
-
-// –– Physics constants ––
-var GRAVITY        = 0.7;
-var FRICTION       = 0.82;
-var ANGULAR_DAMP   = 0.55;
-var BOUNCE         = 0.05;
-var NUM_RADIUS     = 46;
-var ARM_PUSH_ARC   = 0.20;
-var ARM_PUSH_FORCE = 10;
-var FONT_SIZE      = 88;
-var FONT           = ’bold ’ + FONT_SIZE + ‘px Arial Black, Arial, sans-serif’;
-var SLEEP_V        = 0.4;
-var SLEEP_A        = 0.008;
-
-// –– Build number pile ––
-var numbers = [];
-for (var i = 1; i <= 12; i++) {
-var col = (i - 1) % 4;
-var row = Math.floor((i - 1) / 4);
-numbers.push({
-label:    String(i),
-x:        CX + (col - 1.5) * (NUM_RADIUS * 2.1) + (Math.random() - 0.5) * 20,
-y:        CY + DISK_R * 0.55 + row * (NUM_RADIUS * 2.1) + (Math.random() - 0.5) * 20,
-vx:       0,
-vy:       0,
-angle:    (Math.random() - 0.5) * 0.4,
-angVel:   0,
-r:        NUM_RADIUS,
-sleeping: false
-});
-}
-
-// –– Clock angles ––
-function clockAngles() {
-var now  = new Date();
-var h    = now.getHours() % 12;
-var m    = now.getMinutes();
-var s    = now.getSeconds();
-var ms   = now.getMilliseconds();
-var base = -Math.PI / 2;
-return {
-sec: base + ((s + ms / 1000) / 60) * Math.PI * 2,
-min: base + ((m + s  / 60)   / 60) * Math.PI * 2,
-hr:  base + ((h + m  / 60)   / 12) * Math.PI * 2
-};
-}
-
-// –– Angular difference ––
-function angDiff(a, b) {
-var d = a - b;
-while (d >  Math.PI) d -= Math.PI * 2;
-while (d < -Math.PI) d += Math.PI * 2;
-return d;
-}
-
-// –– Seconds arm sweeps numbers ––
-function applySweep(secAngle, dAngle) {
-if (Math.abs(dAngle) < 0.00005) return;
-for (var i = 0; i < numbers.length; i++) {
-var n    = numbers[i];
-var dx   = n.x - CX;
-var dy   = n.y - CY;
-var dist = Math.sqrt(dx * dx + dy * dy);
-if (dist < 10) continue;
-var na        = Math.atan2(dy, dx);
-var diff      = angDiff(na, secAngle);
-if (diff > -ARM_PUSH_ARC && diff < ARM_PUSH_ARC * 0.3) {
-var tx        = -dy / dist;
-var ty        =  dx / dist;
-var proximity = 1 - Math.abs(diff) / ARM_PUSH_ARC;
-var leverage  = dist / DISK_R;
-var force     = ARM_PUSH_FORCE * proximity * (0.4 + leverage * 0.8);
-n.vx      += tx * force;
-n.vy      += ty * force;
-n.angVel  += dAngle * 0.5 * proximity;
-n.sleeping = false;
-}
-}
-}
-
-// –– Number collisions ––
-function resolveCollisions() {
-for (var i = 0; i < numbers.length; i++) {
-for (var j = i + 1; j < numbers.length; j++) {
-var a    = numbers[i];
-var b    = numbers[j];
-var dx   = b.x - a.x;
-var dy   = b.y - a.y;
-var d    = Math.sqrt(dx * dx + dy * dy);
-var minD = a.r + b.r;
-if (d >= minD || d < 0.01) continue;
-var nx  = dx / d;
-var ny  = dy / d;
-var ov  = (minD - d) * 0.5;
-a.x -= nx * ov;  a.y -= ny * ov;
-b.x += nx * ov;  b.y += ny * ov;
-var dvx = b.vx - a.vx;
-var dvy = b.vy - a.vy;
-var dot = dvx * nx + dvy * ny;
-if (dot >= 0) continue;
-var imp = dot * (1 + BOUNCE) * 0.5;
-a.vx += nx * imp;  a.vy += ny * imp;  a.sleeping = false;
-b.vx -= nx * imp;  b.vy -= ny * imp;  b.sleeping = false;
-var cross = dvx * ny - dvy * nx;
-a.angVel += cross * 0.006;
-b.angVel -= cross * 0.006;
-}
-}
-}
-
-// –– Disk wall ––
-function resolveWalls() {
-for (var i = 0; i < numbers.length; i++) {
-var n    = numbers[i];
-var dx   = n.x - CX;
-var dy   = n.y - CY;
-var dist = Math.sqrt(dx * dx + dy * dy);
-var maxD = DISK_R - n.r;
-if (dist <= maxD || dist < 0.01) continue;
-var nx = dx / dist;
-var ny = dy / dist;
-n.x = CX + nx * maxD;
-n.y = CY + ny * maxD;
-var dot = n.vx * nx + n.vy * ny;
-if (dot > 0) {
-n.vx    -= (1 + BOUNCE) * dot * nx;
-n.vy    -= (1 + BOUNCE) * dot * ny;
-n.angVel *= BOUNCE;
-}
-}
-}
-
-// –– Physics step ––
-function stepPhysics(secAngle, dAngle) {
-applySweep(secAngle, dAngle);
-for (var i = 0; i < numbers.length; i++) {
-var n = numbers[i];
-if (n.sleeping) continue;
-n.vy    += GRAVITY;
-n.vx    *= FRICTION;
-n.vy    *= FRICTION;
-n.x     += n.vx;
-n.y     += n.vy;
-n.angle += n.angVel;
-n.angVel *= ANGULAR_DAMP;
-if (Math.abs(n.angVel) < SLEEP_A) n.angVel = 0;
-var speed = Math.sqrt(n.vx * n.vx + n.vy * n.vy);
-if (speed < SLEEP_V && n.angVel === 0) {
-n.vx = 0; n.vy = 0;
-n.sleeping = true;
-}
-}
-resolveCollisions();
-resolveWalls();
-resolveCollisions();
-resolveWalls();
-}
-
-// –– Draw hand ––
-function drawHand(angle, length, backLen, width, color) {
-ctx.save();
-ctx.translate(CX, CY);
-ctx.rotate(angle);
-ctx.strokeStyle = color;
-ctx.lineWidth   = width;
-ctx.lineCap     = ‘round’;
+ctx.fillStyle = ‘#000’;
 ctx.beginPath();
-ctx.moveTo(-backLen, 0);
-ctx.lineTo(length, 0);
-ctx.stroke();
-ctx.restore();
-}
-
-// –– Main loop ––
-var FPS      = 30;
-var FRAME_MS = 1000 / FPS;
-var lastTime = 0;
-var prevSec  = null;
-
-function loop(ts) {
-requestAnimationFrame(loop);
-if (ts - lastTime < FRAME_MS) return;
-lastTime = ts;
-
-```
-var angles = clockAngles();
-var sec    = angles.sec;
-var min    = angles.min;
-var hr     = angles.hr;
-var dAngle = (prevSec === null) ? 0 : angDiff(sec, prevSec);
-prevSec    = sec;
-
-stepPhysics(sec, dAngle);
-
-// 1. Pink background - overdraw, no clearRect
-ctx.fillStyle = COL_BG;
-ctx.fillRect(0, 0, W, H);
-
-// 2. Black disk
-ctx.beginPath();
-ctx.arc(CX, CY, DISK_R, 0, Math.PI * 2);
-ctx.fillStyle = COL_DISK;
+ctx.arc(960, 540, 470, 0, Math.PI * 2);
 ctx.fill();
 
-// 3. Numbers
-ctx.font         = FONT;
-ctx.textAlign    = 'center';
-ctx.textBaseline = 'middle';
-for (var i = 0; i < numbers.length; i++) {
-  var n = numbers[i];
-  ctx.save();
-  ctx.translate(n.x, n.y);
-  ctx.rotate(n.angle);
-  ctx.shadowColor   = 'rgba(0,0,0,0.6)';
-  ctx.shadowBlur    = 8;
-  ctx.shadowOffsetX = 3;
-  ctx.shadowOffsetY = 3;
-  ctx.fillStyle = COL_NUM;
-  ctx.fillText(n.label, 0, 0);
-  ctx.restore();
+ctx.fillStyle = ‘#fff’;
+ctx.font = ‘bold 80px Arial’;
+ctx.textAlign = ‘center’;
+ctx.textBaseline = ‘middle’;
+ctx.fillText(‘GRAVITY CLOCK TEST OK’, 960, 540);
+
+msg.textContent = ‘Canvas OK’;
+} catch(e) {
+msg.textContent = ’ERROR: ’ + e.message;
 }
-ctx.shadowColor = 'transparent';
-ctx.shadowBlur  = 0;
-
-// 4. Hands
-drawHand(hr,  DISK_R * 0.48, DISK_R * 0.12, 14, COL_HAND);
-drawHand(min, DISK_R * 0.75, DISK_R * 0.12,  9, COL_HAND);
-drawHand(sec, DISK_R * 0.88, DISK_R * 0.18,  5, COL_SEC);
-
-// 5. Centre pivot
-ctx.beginPath();
-ctx.arc(CX, CY, 16, 0, Math.PI * 2);
-ctx.fillStyle = COL_DOT;
-ctx.fill();
-ctx.beginPath();
-ctx.arc(CX, CY, 7, 0, Math.PI * 2);
-ctx.fillStyle = '#fff';
-ctx.fill();
-```
-
-}
-
-requestAnimationFrame(loop);
-
-})();
 </script>
 
 </body>
